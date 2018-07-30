@@ -1,0 +1,285 @@
+#!/usr/local/bin/perl
+# Perl Program:  tmf2.prl
+# Author:	 Gordon Wong
+# Date: 	 1/23/96
+# Description:   Uses tagraw2.txt for input.  Tagraw usually created from 
+# tagraw.4ge.  tagraw.txt is a pipe delimited ascii file with all the info 
+# needed for 
+# tag printing routines.   tmf.prl will create up to 16 output text files.  It 
+# basically seperates the tagraw.txt data into the appropriate type of tag files
+# seperated by size, (advance/decline) and TPR or not.
+#  ie.  dlr   - Decline Large Regular
+#       alr   - Advance Large Regular
+#       dsr   - Decline Small Regular
+#       dtr   - Decline Tiny  Regular
+#       dgt   - Decline siGn  TPR
+#       dar   - Decline ad regular (6 up)
+#       aer   - Advance 8 up ad regular
+#       det   - Decline 8 up 10 for $10
+#  added color, so now files are
+#    colors are as follows:
+#      n - none
+#      t = tan   - orignally for raleys reg and dsd
+#      w = white - raleys Sac. Fleming
+#      b = blue  - raleys Bergen
+#      y = yellow -raleys meat
+#      o = orange -raleys orange
+#      g = green  -raleys tpr
+#      Also - could select color by vendor and department
+
+# Modifications:
+# 3/06/97 - ggw - Errors with 0 or null in nfor_unt when starting ad date 
+#                 checking.  This prevented printing any tag after this error.
+#                 Change logic to check for both 0 and null of nfor_unt.
+
+# 4/18/97 - ggw - tagraw.txt input file has 2 new parameters. hold and 
+#                 tag_quantity 
+#
+# 10/8/97 - ggw - Modified for new tag format (check format)
+# 1/25/00 - ggw - added ad type of "C" for compare basket.  Print on 
+#                 regular tags so adding to "R"egular batch
+# 5/10/04 - jtp - Add support for 8 up tags, including 10/$10 tags
+# 5/11/04 - jtp - Add support for 8 BOGO tags
+# 2018-06-27    - If tag_type=3 will set output_string_tag_type to "o" to print TPR tag
+
+# Data format of input file
+# Number of Bytes
+$batch=@ARGV[0];
+$chain=@ARGV[1];
+if (($batch eq "")|($chain eq "")) { print ("no arguments in tmf2.prl\n"); 
+  exit;
+}
+  
+$batnm="tag$batch";
+$infile="tagraw$batch.txt";
+system ("rm $batnm???.txt 2>/dev/null");
+system ("rm $batnm???.ps 2>/dev/null");
+system ("rm $batnm????.txt 2>/dev/null");
+system ("rm $batnm????.ps 2>/dev/null");
+#print ("batnm: $batnm\n");
+#print ("Opening file: tagraw$batch.txt\n");
+#unless (open(inputfile,"tagraw.txt")) { die ("cannot open file in file \n"); }
+
+#Get Ad Tag format (6/8 up)
+$ad_tag_up=`getparam.prl ad_tag_up`;
+#Get BB Tag format (6/8 up)
+$bb_tag_up=`getparam.prl bb_tag_up`;
+
+unless (open(inputfile,$infile)) { die ("cannot open inputfile.\n"); }
+
+### Opening up all output files ###
+if ($chain eq "R") {
+  #@colors=("t","w","b","y","o","g");
+  #@adv_dec=("a","d");
+  #@sizes=("t","a");
+  #@types=("r","1","5","9");
+  @tag_type=("tatr","watr","batr","yatr","oatr","gatr",
+	     "tdtr","wdtr","bdtr","ydtr","odtr","gdtr",
+	     "naa1","naa5","naa9","nda1","nda5","nda9",
+             "nae1","nae5","naet","nde1","nde5","ndet",
+             "naeb","ndeb");
+
+  foreach $lp_tag_type (@tag_type)  {
+    $filename_suffix="$lp_tag_type";
+    $outfilehandle="tagout$filename_suffix";
+    $outfilename="$batnm$filename_suffix.txt";
+    unless(open($outfilehandle,">$outfilename"))  
+      { die ("cannot open handle $outfilehandle: file $outfilename\n");}
+  }
+}
+elsif ($chain eq "F") {
+  @colors=("n");
+  @adv_dec=("a","d");
+  @sizes=("l","t","g");
+  @types=("r","o","a");
+  foreach $lp_color (@colors) {
+    foreach $lp_adv_dec (@adv_dec) {
+      foreach $lp_sizes (@sizes) {
+        foreach $lp_types (@types) {
+          $filename_suffix="$lp_color$lp_adv_dec$lp_sizes$lp_types";
+          #print ("$filename_suffix \n");
+          $outfilehandle="tagout$filename_suffix";
+          $outfilename="$batnm$filename_suffix.txt";
+          #print ("Tagout file handle: $outfilehandle \n");
+          #print ("Tagout file name:   $outfilename \n");
+          unless(open($outfilehandle,">$outfilename"))  
+            { die ("cannot open handle $outfilehandle: file $outfilename\n");}
+          #open_file ($batnm,"$lp_color$lp_adv_dec$lp_sizes$lp_types");
+        }
+      }
+    }
+  }
+}
+
+while ($input=<inputfile>) {
+  @array= split(/\|/, $input);
+  $arraylen=@array;
+  if ($arraylen <= 1) {
+    next;
+  }
+  #print ("array length is ", $arraylen, "\n");
+  #print($array[0],$array[2],$array[8]," ");
+  $tag_size=$array[0];
+  $tag_type=$array[1];
+  $tag_quan=$array[2];
+  #$whse=$array[3];
+  #$order_no=$array[4];
+  #$itm_code=$array[5];
+  #$dept=$array[6];
+  #$sub=$array[7];
+  $price=$array[8];
+  $nfor_price=$array[9];
+  $nfor_unt= $array[10];
+  #$desc_30=$array[11];
+  #$desc_sign2=$array[12];
+  #$item_pack=$array[13];
+  #$item_size=$array[14];
+  #$item_meas=$array[15];
+  #$case_cost=$array[16];
+  #$case_pack= $array[17];
+  #$smprice=$array[18];
+  #$description=$array[19];
+  $cur_price=$array[20];
+  $cur_nfor_price= $array[21];
+  $cur_nfor_unt= $array[22];
+  $ad_start= $array[23];
+  $ad_end=$array[24];
+  $ad_limit=$array[25];
+  $aisle=$array[26];
+  $tag_color= $array[27];
+
+  #$tag_size=0;
+  if (($cur_price == 0) && ($cur_nfor_unt != 0 )) {
+    $tag_from_price=$cur_nfor_price/$cur_nfor_unt; }
+  else {
+    $tag_from_price=$cur_price; }
+
+  #  begmod ggw 3/6/97
+  if (($price == 0) && ($nfor_unt != 0)) {
+    $tag_to_price=$nfor_price/$nfor_unt; }
+  else {
+    $tag_to_price=$price; }
+
+  #  if ($price == 0) 
+  #    $tag_to_price=$nfor_price/$nfor_unt; }
+  #  else {
+  #    $tag_to_price=$price; }
+  # endmod ggw 3/6/97
+
+  if ($chain eq "R") {
+    $os_tag_color="t";
+    $os_tag_adv="a";
+    $os_tag_size="t";
+    $os_tag_type="r";
+  }
+  elsif ($chain eq "F") {
+    $os_tag_color="n";
+    $os_tag_adv="a";
+    $os_tag_size="l";
+    $os_tag_type="r";
+  }
+  #form output suffix (os) filename
+  # 2018-06-27 - Adding tag_type=3 will set os_tag_type to "o" for TPR tag
+  if ($chain eq "F") {
+    if ($tag_type eq "1") {$os_tag_type="a";}
+    if ($tag_type eq "3") {$os_tag_type="o";}
+    if ($tag_type eq "5") {$os_tag_type="o";}
+    if ($tag_size&8) {$os_tag_size="g";}
+    if ($tag_size&4) {$os_tag_size="t";}
+    if ($tag_size&2) {$os_tag_size="t";}
+    if ($tag_size&1) {$os_tag_size="l";}
+  } 
+  elsif ($chain eq "R") {
+    #print ("tag color 1: $tag_color  os: $os_tag_color \n");
+    $color_ok=0;
+    if ($tag_color ne 0) {
+      # force tag color to be one of the colors in array
+      #@tag_colors=("t","w","b","y","o","g","n");
+      @tag_colors=("T","W","B","Y","O","G","N");
+      $color_ok=0;
+      foreach $check_color (@tag_colors) {
+        if ($tag_color eq $check_color) {
+          $color_ok=1; 
+        }
+      }
+    } 
+    if ($color_ok==0) {
+      $os_tag_color="t";
+    }
+    else { 
+      #$os_tag_color=$tag_color; 
+      # Change upper case to lower case
+      if ($tag_color eq "W")  {$os_tag_color="w";}
+      elsif ($tag_color eq "T")  {$os_tag_color="t";}
+      elsif ($tag_color eq "B")  {$os_tag_color="b";}
+      elsif ($tag_color eq "Y")  {$os_tag_color="y";}
+      elsif ($tag_color eq "O")  {$os_tag_color="o";}
+      elsif ($tag_color eq "G")  {$os_tag_color="g";}
+      elsif ($tag_color eq "N")  {$os_tag_color="n";}
+      else {$os_tag_color="t";}
+      
+    }
+    #print ("tag color 4: $tag_color  os: $os_tag_color \n");
+    if ((($tag_type eq "1")|($tag_type eq "5"))|($tag_type eq "9")) {
+      $os_tag_size="a";
+      $os_tag_type=$tag_type;
+      $os_tag_color="n";
+    } 
+    if ($tag_size&2) {
+      $os_tag_size="a";
+      $os_tag_color="n";
+    }
+
+    if ($tag_type eq "1" && $ad_tag_up eq "8") {$os_tag_size="e";}
+    if ($tag_type eq "5" && $bb_tag_up eq "8") {$os_tag_size="e";}
+
+    if ($tag_size&1) {
+      $os_tag_size="t";
+    }
+    #print ("$input \n");
+    #print ("$os_tag_size \n");
+  }
+  #print ("tag color 6: $tag_color  os: $os_tag_color \n");
+  if ($tag_from_price < $tag_to_price) { $os_tagadv="a"; }
+  else { ($os_tag_adv="d"); }
+
+  if ($chain eq "R") {
+    # 10 for $10 tags
+    if (($nfor_price == 10) && ($nfor_unt == 10)) {
+      $os_tag_size="e";
+      $os_tag_color="n";
+      $os_tag_type="t";
+    }
+  }
+  if ($chain eq "R") {
+    # BOGO tags
+    if (($nfor_price == $price) && ($nfor_unt == 2)) {
+      $os_tag_size="e";
+      $os_tag_color="n";
+      $os_tag_type="b";
+    }
+  }
+
+  $out_suffix="$os_tag_color$os_tag_adv$os_tag_size$os_tag_type";
+  # print ("tag color 7: $tag_color  os: $os_tag_color \n");
+   #print ("out_suffix:  ",$out_suffix,"\n");
+  #print ("tagout$out_suffix \n");
+  #$outfilewsuf="$batnm$out_suffix";
+  $outfilewsuf="tagout$out_suffix";
+  print $outfilewsuf ($input); 
+  #print ("outfile: $outfilewsuf \n");
+}
+#for ($count=0;$count<$arraylen;$count++) {
+#  print ("Element ",$count,": ",@array[$count], "\n");
+#  next;
+
+sub open_file {
+  local ($tagbatnm, $filename)= @_; 
+  $filename_len=length($filename);
+  $filename_suffix=substr($filename,$filename_len-4,4); 
+  #print ("$filename ");
+  #print ("$filename_suffix ");
+  #print ("tagout.$filename_suffix \n");
+  unless(open(tagout.$file_suffix,">$tagbatnm$filename_suffix.txt"))  
+    { die ("cannot open tag.$tagbatnm.$filename_suffix file.txt \n");}
+}  
