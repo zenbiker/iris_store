@@ -1,0 +1,199 @@
+#!/usr/local/bin/perl
+
+# Program:  pr_tags2.prl   PERL program  New tag format check mark
+# Author:   Gordon Wong
+# Date:     8/12/96
+# Description:  Main routine to print store signs and tags
+# Calls the following programs
+#   tagraw3.4ge - Queries itemmore table and creates ascii file for tag program
+#                input
+#   tmf2.prl    - Seperates tagraw.txt file and splits into seperate tag type 
+#                files
+#   tagall4.prl - Makes actual postscript file for printing (.ps files)
+#   getparam.prl - reads parameter file
+
+# Subroutines 
+#  mk_ps_files - Makes postscript files from ascii files
+#  print_tags  - Sends postscript files to lp spooler
+
+#  Modifications 
+#  4/18/97 - ggw - Change to print_tags to not print file if txt file is empty
+#  7/6/00 -  ggw - Add raleys support
+#  12/10/00  ggw - Add starting tag support to start printing on specified tag
+#  06/05/07  jtp - Added support for default tag print order
+#  2018-07-26 ggw - Add support for NEW TPR and AD tags 6 up and 2 up  for Food Source. 
+#                   Change label prompt from TPR to TPR/Extra (Savings)
+
+# MAIN PROGRAM
+  system("clear");
+  print ("Creating Tag Batch \n");
+  print ("\n\n");
+
+  $batch=@ARGV[0];
+
+  #Get chain from paramter file
+  $chain=`getparam.prl chain`;
+  print ("chain is: $chain\n");
+  #$temp=<STDIN>;
+  $reg_type=`getparam.prl register`;
+  $store_no=`getparam.prl store`;
+  $def_sort=`getparam.prl def_sort`;
+
+system("tagraw3.4ge $batch $chain $reg_type $def_sort");#Create Text file with data to print from database 
+system("tmf2.prl $batch $chain");   #Seperate tagraw$batch_no file to multi type files
+&cons_files; #  consolidate tag text files
+#&mk_ps_files;                #Create postscript files for each file type
+&print_tags;  #Prompt and send each PS file to printer
+
+# End of Main Program
+
+
+  
+sub print_tags {
+   print ("Printing tags....\n");
+   print ("\n");
+   local($batch_length, $filename_length, $filename_nosuf,@tagfiles);
+   local($file_tag_color, $file_tag_size, $file_tag_type, $start_tag);
+   $batch_length=length($batch); 
+ 
+   opendir (DIR, "./");
+   open (TAGFILEHDL, "ls tag$batch?a??.txt|");
+   @tagfiles=<TAGFILEHDL>;
+   foreach $filename (@tagfiles) {
+      chop $filename;
+      if ((-s $filename) && (-e $filename)) { 
+         #print ("File print_tag sub:  $filename \n");
+         # get color and size of tag
+         $filename_length=length($filename);
+         $filename_nosuf=substr($filename,0,$filename_length-3-1);
+         $file_tag_color=substr($filename,3+$batch_length,1);
+         $file_tag_size=substr($filename,3+$batch_length+2,1);
+         $file_tag_type=substr($filename,3+$batch_length+3,1);
+         #print ("color: $file_tag_color \n");
+         #print ("size : $file_tag_size  \n");
+         #print ("type : $file_tag_type  \n");
+         if ($chain eq "R") {
+            if ($file_tag_color eq "n") { $tag_color_name=" ";}
+            elsif ($file_tag_color eq "t") { $tag_color_name="Tan";}
+            elsif ($file_tag_color eq "w") { $tag_color_name="White";}
+            elsif ($file_tag_color eq "b") { $tag_color_name="Blue";}
+            elsif ($file_tag_color eq "y") { $tag_color_name="Yellow";}
+            elsif ($file_tag_color eq "o") { $tag_color_name="Orange";}
+            elsif ($file_tag_color eq "g") { $tag_color_name="Green";}
+            else  { $tag_color_name="Tan";}
+    
+            if ($file_tag_type eq "r") { $tag_type_name="Regular";}
+            elsif ($file_tag_type eq "1") { $tag_type_name="Ad";}
+            elsif ($file_tag_type eq "4") { $tag_type_name="Extreme BB";}
+            elsif ($file_tag_type eq "5") { $tag_type_name="Bonus Buy";}
+            elsif ($file_tag_type eq "9") { $tag_type_name="Value Planner";}
+            elsif ($file_tag_type eq "t") { $tag_type_name="10 for \$10";}
+            elsif ($file_tag_type eq "b") { $tag_type_name="BOGO";}
+            else {$tag_type_name="Regular";}
+    
+            if ($file_tag_size eq "t") { $tag_size_name="Tiny";}
+            elsif ($file_tag_size eq "a") { $tag_size_name="6 UP";}
+            elsif ($file_tag_size eq "e") { $tag_size_name="8 UP";}
+            else {$tag_size_name="Tiny";}
+    
+         }
+         elsif ($chain eq "F") {
+            $tag_color_name=" ";
+            if ($file_tag_type eq "r") { $tag_type_name="Regular";}
+            elsif ($file_tag_type eq "o") { $tag_type_name="TPR/Extra";}
+            elsif ($file_tag_type eq "a") { $tag_type_name="As Advertised";}
+            else {$tag_type_name="Regular"; }
+    
+            if ($file_tag_size eq "l") { $tag_size_name="Large";}
+            elsif ($file_tag_size eq "t") { $tag_size_name="Tiny";}
+            elsif ($file_tag_size eq "s") { $tag_size_name="Tiny";}
+            elsif ($file_tag_size eq "g") { $tag_size_name="Sign";}
+            else {$tag_size_name="Large";}
+    
+         }
+         #system("clear");
+         print ("-----------------------------------------------------------------\n");
+         if ($chain eq "R") {
+            print ("Please insert $tag_color_name, $tag_size_name, $tag_type_name Tags\n");
+         }
+         else {
+            print ("Please insert $tag_size_name, $tag_type_name Tags\n");
+         }
+         #print ("Tag count is: \n");
+         #system("wc $filename|cut -c1-7");
+         print ("Press (S)kip, Start Tag #, and/or <enter>: ");
+         $start_tag=<STDIN>;
+         chop($start_tag);
+         if (($start_tag eq "s")||($start_tag eq "S")) { 
+            print "Skipping file... \n";
+         }
+         else {
+            print ("Okay... Printing $color $size tags \n");
+            system("tagall5.prl $filename_nosuf $chain $start_tag");
+            if ($store_no eq "800")  { 
+               system("lp -dmis $filename_nosuf.ps");
+            }
+            elsif ($store_no eq "999") {
+              system("lp -dpslaser $filename_nosuf.ps");
+            }
+            elsif ($chain eq "R")    { 
+               system("qadm -Uscanlaser");
+               system("lp -dscanlaser $filename_nosuf.ps"); 
+            }
+            else { 
+               system("qadm -Utaglaser:hp\@laser");
+               system("qprt -Ptaglaser -ds $filename_nosuf.ps"); 
+            }
+            print (" \n");
+         }
+      }
+   }
+}    
+
+
+# Consolidate Tag files
+#   Combine advance and decline batch so only need to print advance batch
+sub cons_files {
+  #$lookup="chain";
+  #$test=`getparam.prl $lookup`;
+  #print "$lookup = $test \n" ;
+  #$batch=22;
+  local($decline_tag, $batch_length, $adv_dec_code,$filename_length, 
+    $adv_filename, @tagfiles);
+  $decline_tag="decline_tag.tag";
+  $batch_length=length($batch); 
+
+  opendir (DIR, "./");
+  open (TAGFILEHDL, "ls tag$batch????.txt|");
+  @tagfiles=<TAGFILEHDL>;
+  foreach $filename (@tagfiles) {
+    chop $filename;
+    #print ("$filename \n");
+    $adv_dec_code_pos=3+$batch_length+1;
+    $adv_dec_code=(substr($filename,$adv_dec_code_pos,1));
+    #print ("adv_dec_code $adv_dec_code \n");
+
+    if ($adv_dec_code eq "d") {
+      if ((-s $filename) && (-e $filename)) { 
+        $filename_length=length($filename);
+        $adv_filename=substr($filename,0,$adv_dec_code_pos)."a".substr($filename,$adv_dec_code_pos+1,$filename_length-$adv_dec_code_pos-1);
+        system("cat $adv_filename $decline_tag $filename>temp$batch.txt");
+        system("cp temp$batch.txt $adv_filename");
+        #print ("Combining $adv_filename and $filename \n"); 
+      }
+    }
+  }    
+}
+
+sub mk_ps_files {
+  local($filename,$start_tag=@_);
+  local($batch_length, $filename_length, $filename_nosuf, @tagfiles);
+  $batch_length=length($batch); 
+  chop $filename;
+  if ((-s $filename) && (-e $filename)) { 
+    $filename_length=length($filename);
+    $filename_nosuf=substr($filename,0,$filename_length-3-1);
+    system("tagall4.prl $filename_nosuf $chain");
+  
+  }
+}    

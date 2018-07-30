@@ -1,0 +1,1802 @@
+#!/usr/local/bin/perl
+#
+# Program:  tagall5.prl
+# Desc:     Perl program that will take a ascii delimited file and create
+#           a postscript file.  Part of the tag creation set of programs.
+#           Modified to fit new tag (CHECK MARK) format
+# Author:   Gordon Wong
+# Date:     2/7/96
+#
+# Modifications:
+# 3/6/97 - ggw - error when nfor_unt field is 0, added && ($nfor_unt != 0) to 
+#          to 2 if statements when calculating price (Line 171)
+#
+# 4/16/97 - ggw - add tag_quan and desc_sign2 support. Also add New designator
+#           if there is no current price.  Current price is currently the last 
+#           3 fields passed in the ascii text file.
+# 4/16/97 - ggw - add tag_quan and desc_sign2 support. Also add New designator
+#           if there is no current price.  Current price is currently the last 
+#           3 fields passed in the ascii text file.
+# 10/10/97 -ggw - modified to checkmark format, also uses last three letters 
+#           of passed filename to determine size and type of tag.
+# 12/19/97 -ggw added born on dates for 100 day large tags and signs
+#  1/22/98 -ggw move born on date for 100 day sign to bottom
+#  4/09/98 -ggw fixed bug on printing multiple headers without showpage
+#  7/18/98 -ggw tiny tags have top line moved to right by .25 inch
+#           also fix multiple pricing on tiny tags.
+#  2/22/99 -ggw add whse name, aisle, dept and subdept to tag
+#  1/3/00  -ggw date stamp fix for y2k and add crv to tag ( was printing 100
+#           for the year instead of 00 or 2000
+#  6/17/00 -ggw add support for raley's tag types.  Already use small,
+#          -6up, ad,bb,  Colors: blue, brown, yellow,  (a_placement,a_font,a_)
+#  11/14/00- ggw - Print multiple pricing before single unit pricing
+#  11/14/00 ggw  - Ad limit text to Raley's tags, also add vendor to small tags
+#  12/07/00 ggw - remove Parenthesis from descriptions
+#  12/08/00 ggw - allow specification of starting tag number
+#  7/24/01  ggw - VMC vendor only uses one check digit on tag
+#  9/17/01  ggw - Limit Ad tag for Over limit price
+#  3/07/03  ggw - 2 week movement to print on tag.  mvmt=3 if mvmt appears <3 
+#  2/02/04  ggw - Change from 6 up to 8 up for as bonus buy and as ad talkers
+#  6/11/07  jtp - Don't print actual CRV amount
+# 10/22/14  ggw - Remove supermarket price and save amount on sign placement routine
+# 03/21/18  ggw - Reformat to Large tags to 5 box Sac n Save format
+
+#RUN "lp -dlaser -obottom -onb tagdone.txt"
+
+@timearray=(localtime(time));
+#ggw - 1/3/00 y2k fix 
+#$today=sprintf("%2d/%2d/%2d",@timearray[4]+1,@timearray[3],@timearray[5]);
+$year=sprintf(@timearray[5]+1900);
+$year=substr($year,2,2);
+$today=sprintf("%2d/%2d/%2s",@timearray[4]+1,@timearray[3],$year);
+
+$filename="@ARGV[0]";
+$chain="@ARGV[1]";
+$start_tag_no="@ARGV[2]";
+
+#Specify Chain here 
+#$chain="R"; #R=Raley , F=Food Source
+#$chain=`getparam.prl chain`;
+
+$infile="$filename.txt";
+print ("Creating PS Print file for $infile, ");
+#print ("Chain: $chain\n");
+
+$page_no=1;
+$tag_cur_cnt=0;
+$tag_cnt_page=0;
+
+$outfile="$filename.ps";
+#$logfile="$filename.log";
+
+
+unless (open(inputfile,"$infile")) { die ("cannot open file in file \n"); }
+unless (open(outfile,">$outfile")) { die ("cannot open file in file \n"); }
+#unless (open(logfile,">$logfile")) { die ("cannot open file in file \n"); }
+#  FIRST PAGE HEADER
+$firstpage=1;
+$page_header_preset=0;
+$filename_len=length($filename);
+$tagsize=substr($filename,$filename_len-2,1); #Large,Small,Tiny,siGn,6up
+$tagtype=substr($filename,$filename_len-1,1); #Regular,Tpr,AsAdvertised,6up
+#$tagsize=@ARGV[1];
+$large=0;
+$small=0;
+$tiny=0;
+$sign=0;
+if ($chain eq "F") { 
+  if ($tagsize eq "s") { $tiny=1;
+    print ("Small-> Tiny Tags \n");}
+  elsif ($tagsize eq "t") { $tiny=1;
+    print ("tiny Tags \n");}
+  elsif ($tagsize eq "l") { $large=1;
+    print ("Large Tags \n");}
+  elsif ($tagsize eq "g") { $sign=1;
+    print ("Signs \n");}
+  else { $large=1;
+    print ("Large Tags \n"); 
+    $tagsize="l"; }
+}
+elsif ($chain eq "R") {
+  if ($tagsize eq "t") {
+    print ("10 for $10 Tags \n"); 
+  }
+  elsif ($tagsize eq "a") {
+    print ("6 up Tags \n"); 
+  }
+  elsif ($tagsize eq "e") {
+    print ("8 up Tags \n"); 
+  }
+  else {
+    print ("small Tags \n"); 
+    $tagsize="r"; 
+  }
+}
+
+#print ("Tagsize: $tagsize \n");
+
+$tagtype_str1="";
+$tagtype_str2="";
+$tagtype_str3="";
+
+if ($chain eq "F") { 
+  if ($tagtype eq "r") { 
+    $tagtype_str1="EVERYDAY";
+    $tagtype_str2="LOW PRICE";
+    }
+  elsif ($tagtype eq "5") { 
+    $tagtype_str1="TEMPORARY";
+    $tagtype_str2="REDUCTION";
+    }
+  elsif ($tagtype eq "1") { 
+    $tagtype_str1="ADVERTISED";
+    $tagtype_str2="PRICE";
+    $tagtype_str3="Born On:";
+    }
+  }
+elsif ($chain eq "R") { 
+  $tagtype_str1="";
+  $tagtype_str2="";
+  $tagtype_str3="";
+}
+
+#print ("Tagtype: $tagtype \n");
+#print ("tagtype_str1: $tagtype_str1 \n");
+#print ("tagtype_str2: $tagtype_str2 \n");
+
+# PS file start
+print outfile  ("%!PS\n");
+print outfile  ("% PS File for $tagsize tags\n");
+#ggw - removed from printing, did not change to lower tray on some printers
+#print outfile  ("0 setpapertray\n");
+
+&make_bar_font;
+# Postscript Variables
+print outfile ("/rightshow\n");
+print outfile ("{dup stringwidth pop\n");
+print outfile ("120 exch sub\n");
+print outfile ("0 rmoveto\n");
+print outfile ("show} def\n");
+
+print outfile ("/rshow\n");
+print outfile ("{dup stringwidth pop\n");
+print outfile ("0 exch sub\n");
+print outfile ("0 rmoveto\n");
+print outfile ("show} def\n");
+
+#Define subroutine variable names
+$font_sub=$tagsize._fonts;
+$header_sub=$tagsize._header;
+$placement_sub=$tagsize._placement;
+
+&$font_sub;     #print out font definintions
+
+# Set Variables
+$crow=1;	#current row and column
+$ccol=1;
+$nrow=0;	#number of row and column on type of tag stock
+$ncol=0;
+$esc = "\x1B";
+$cent ="\xA2";
+$tdate = $today;
+$ttag_quan=0;
+$tdesc_sign2="";
+$tnew="";
+
+#  START LOOP 
+while ($input=<inputfile>) {
+  if ((($crow == 1) && ($ccol == 1)) && $page_header_preset ==0) {
+    &pageheader;
+    $page_header_preset=1;  #begmod-ggw-4/9/98 added to prevent mult. headers
+  }
+  @array= split(/\|/, $input);
+  $arraylen=@array;
+  if ($arraylen <= 1) {
+   next;
+  }
+  $tag_type=$array[0]; 
+  $tpr_type=$array[1];
+  $tag_quan=$array[2];
+  $whse=$array[3];
+  $order_no=$array[4];
+  $itm_code=$array[5];
+  $dept=$array[6];
+  $sub=$array[7];
+  $price=$array[8];
+  $nfor_price=$array[9];
+  $nfor_unt= $array[10];
+  $desc_30=$array[11];
+  $desc_sign2=$array[12];
+  $item_pack=$array[13];
+  $item_size=$array[14];
+  $item_meas=$array[15];
+  $case_cost=$array[16];
+  $case_pack= $array[17];
+  $smprice=$array[18];
+  $description=$array[19];
+  $cur_price=$array[20];
+  $cur_nfor_price= $array[21];
+  $cur_nfor_unt= $array[22];
+  $ad_start= $array[23];
+  $ad_end=$array[24];
+  $ad_limit=$array[25];
+  $aisle= $array[26];
+  $tag_color=$array[27];
+  $vendor_code=$array[28];
+  $crv_amt=$array[29];
+  $reg_price=$array[30];
+  $reg_nfor_unt=$array[31];
+  $reg_nfor_price=$array[32];
+  $mvmt_last_week=$array[33];
+  #$aisle= "1B1";
+
+  ### CALCULATIONS 
+
+  # set born on date for 100 day tags/signs
+  $tagtype_str4="";
+  if ($tagtype eq "h") { 
+  $tagtype_str4=$ad_start;
+  }
+
+  if (length($itm_code)==11) { 
+      $titm_code=substr($itm_code,0,1)."-".substr($itm_code,1,5)."-".substr($itm_code,6,5);} 
+  else {$titm_code=$itm_code; }
+
+  #  -- Verify a description 30 exists
+  #May Need to add a trim function to desc_30
+  if (length($desc_30) == 0) {
+    $tdesc=$description; }
+  else {
+    $tdesc=$desc_30; }
+  ### check for parenthisis that may disrupt postscript printing
+  $tdesc=clean_ps_text($tdesc);
+
+  if (length($tdesc) < 11) {
+    $descfont="HelvFont10"; }
+  elsif (length($tdesc) < 21) {
+    $descfont="HelvFont20"; }
+  else {
+    $descfont="HelvFont30"; }
+
+ #2018/03/21 ggw added to split description on 2 lines
+  if (length($desc_30) < 16) {
+    $titemdesc1 = $desc_30;
+    $titemdesc2 = " "; }
+  else {
+    #look for space closest to end
+    $titemdesc_break_pos = (rindex(substr($desc_30,0,15), " "));
+    if ($ttitemdesc_break_pos != -1) {
+      $titemdesc1 = substr($desc_30,0,$titemdesc_break_pos);
+      $titemdesc2 = substr($desc_30,$titemdesc_break_pos+1,16);
+    }
+    else {
+      $titemdesc1 = substr($desc_30,0,16);
+      $titemdesc2 = substr($desc_30,16); }
+  }
+
+  $tdesc_sign2=$desc_sign2;
+  if (length($tdesc_sign2) < 11) {
+    $desc_sign2font="HelvFont10"; }
+  elsif (length($tdesc_sign2) < 21) {
+    $desc_sign2font="HelvFont20"; }
+  else {
+    $desc_sign2font="HelvFont30"; }
+
+#    -- check if item_pack exists
+  if ($item_pack ==0) {
+    $titem_pack=1; 
+  }
+  else {
+    $titem_pack=$item_pack; 
+  }
+
+  if ($titem_pack ==1) {
+    $tsitem_pack="  ";
+  }
+  else {
+    $tsitem_pack="$item_pack-";
+  }
+
+  if ($item_size ==0) {
+    $titem_size=1; }
+  else {
+    $titem_size=sprintf("%0.3f",$item_size); }
+
+  
+  $tcase_pack=$case_pack;
+  $titem_meas=$item_meas;
+  $prlocadj="0";
+  $twhse=&whse_name($whse);
+
+    
+#    -- tnprice (numeric) is used for calculation only, not for printing
+#    -- tcprice (character) is used for printing price
+#    -- pprice if used for printing the tag, not for caluculations
+#    -- **** Note the problem with printing even dollars and xx.xx format.
+#    nforpricing=1 if using multiple pricing 
+#    nforpricing=0 not using multi pricing
+ 
+  if (($nfor_price > .01 ) && ($nfor_price < 1 )) {
+    if ($nfor_unt ==0) {$nfor_unt=1}; # set nfor_unt to 1 as default if blank
+    $tnprice=$nfor_price/$nfor_unt;
+    $tcprice=sprintf("%0.0f",100*$nfor_price);
+    if ($nfor_unt > 1 ) {
+      if ($nfor_unt == 2 && $nfor_price == $price) {
+        # BOGO
+        $tcprice=100*$price.$cent;
+      }
+      else {
+        $tcprice=$nfor_unt."/ ". $tcprice.$cent; 
+      }
+      $tcnfor_unt=$nfor_unt."/";
+      $tcnfor_price=sprintf("%0.0f",100*$nfor_price);
+      $tcnfor_price=$tcnfor_price.$cent; 
+      $prlocadj=$centadj; 
+      $nforpricing=1;  
+    }
+    else {
+      $tcprice=$tcprice.$cent; 
+      $nforpricing=0;
+    } 
+  }
+  elsif (($nfor_price >= 1 )) {
+    if ($nfor_unt ==0) {$nfor_unt=1}; # set nfor_unt to 1 as default if blank
+    $tnprice=$nfor_price/$nfor_unt;
+    if ($nfor_unt > 1 ) {
+      if ($nfor_unt == 2 && $nfor_price == $price) {
+        # BOGO
+        $tcprice=sprintf("%0.2f",$nfor_price); 
+      }
+      else {
+        $tcprice=sprintf("%0.0f/%0.2f",$nfor_unt,$nfor_price); 
+      }
+      $tcnfor_unt=$nfor_unt."/";
+      $tcnfor_price=sprintf("%0.2f",$nfor_price);
+      $tcnfor_price=$tcnfor_price; 
+      $nforpricing=1;  
+    }
+    else {
+      $tcprice=sprintf("%0.2f",$nfor_price); 
+      $nforpricing=0;
+    } 
+  }
+  elsif (($price > 0) && ($price < 1)) {
+    $tnprice=$price;
+    $tcprice=sprintf("%0.0f",100*$price);
+    $tcprice=$tcprice.$cent;
+    $prlocadj=$centadj; 
+    $nforpricing=0; 
+  } 
+  elsif ($price >= 1 ) {
+    $tnprice=$price;
+    $tcprice=sprintf("%0.2f",$price);  
+    $nforpricing=0; 
+  }
+  else {
+    $tnprice=0;
+    $tcprice="  ";
+    $nforpricing=0; 
+  }
+
+###############
+# Calculate current Regular price for Ad items
+
+  if (($reg_price > 0) && ($reg_price < 1)) {
+    $tnreg_price=$reg_price;
+    $tcreg_price=sprintf("%0.0f",100*$reg_price);
+    $tcreg_price=$tcreg_price.$cent;
+    $reg_nforpricing=0; } 
+  elsif ($reg_price >= 1 ) {
+    $tnreg_price=$reg_price;
+    $tcreg_price=sprintf("%0.2f",$reg_price);  
+    $reg_nforpricing=0; }
+  elsif ($reg_nfor_unt !=0) {
+    ## calculate the unit price
+    $tnreg_price=$reg_nfor_price/$reg_nfor_unt;
+    ##  Add cent marker if less than $1.00
+    if (($tnreg_price==0) && ($tnreg_price < 1 )) {
+      $tcreg_price=sprintf("%0.0f",100*$tnreg_price);
+      $tcreg_price=$tcreg_price.$cent; }
+    else {
+      $tcreg_price=sprintf("%0.2f",$tnreg_price);  }
+    }
+  else {
+    $tnreg_price=0;
+    $tcreg_price="  "; }
+
+###################
+  # -- tsmprice is the supermarket price calculation
+  if ($smprice <= ($tnprice*1.10)) {
+    $tnsmprice=1.10*$tnprice; }
+  else {
+    $tnsmprice=$smprice;}
+
+  if ($tnsmprice < 1){
+    $tcsmprice=sprintf("%0.0f",($tnsmprice*100));
+    $tcsmprice=$tcsmprice.$cent; }
+  else {
+    $tcsmprice=sprintf("%0.2f",$tnsmprice);}
+
+  #    -- calculate save amount
+  $tnsave = $tnsmprice - $tnprice;
+  #print ("tnsave: $tnsave\n");
+  #if ($tnsave<1 ) {
+  if ($tnsave<.995 ) {
+    $tcsave=sprintf("%0.0f",($tnsave*100));
+    $tcsave=$tcsave.$cent;
+    $tgsave=$tcsave;
+  }
+  else {
+    $tcsave=sprintf("%0.2f",$tnsave);
+    $tgsave=sprintf("\$%0.2f",$tnsave);
+  }
+  #print ("tcsave: $tcsave\n");
+
+  ### Calculate savings from Regular price
+  $tnreg_save = $tnreg_price - $tnprice;
+  if ($tnreg_save<.995 ) {
+    $tcreg_save=sprintf("%0.0f",($tnreg_save*100));
+    $tcreg_save=$tcreg_save.$cent;}
+  else {
+    $tcreg_save=sprintf("%0.2f",$tnreg_save);}
+
+  # -- calculate price per unit
+  $titem_meas = $item_meas;
+  #print ("itemsize: $titem_size\n");
+  #print ("itempack: $titem_pack\n");
+  $tnpriceper = $tnprice/($titem_size*$titem_pack);
+  if ($tnpriceper<1) {
+    $tnpriceper=sprintf("%0.1f",($tnpriceper*100));
+    $tcpriceper=$tnpriceper.$cent; }
+  else {
+    $tcpriceper=sprintf("%0.2f",$tnpriceper); }
+
+  #######   need to CLIP (order_no)
+  if (($whse==6) && length($order_no)<6) {
+    $torder_no="6".&zerofill($order_no,5); }
+  elsif (($whse==16) && length($order_no)<6) {
+    $torder_no="16".&zerofill($order_no,5); }
+  else {
+    $torder_no=$order_no; }
+
+  #Remove the extra/trailing zeros at end of item size
+  $titem_size = sprintf("%g",$titem_size);
+
+  #  tag_quan needs to be set to a negative number to not print a tag
+  #  if tag_quan is 0, 1 tag will still be printed
+  #  Any number greater than 1 will print that number of tags
+  # printf("This is tag_quan: $itm_code, $tag_quan\n");
+  if ($tag_quan < 0) {
+    $ttag_quan=0; }
+  elsif ($tag_quan == 0) {
+    $ttag_quan=1; } 
+  else {
+    $ttag_quan= $tag_quan; } 
+  # printf("This is ttag_quan: $itm_code, $ttag_quan\n");
+
+  # Add NEW designation if there is no current price. (i.e. new item)  
+  if ($cur_price==0 && $cur_nfor_price==0) {
+    $tnew="NW"; }
+  else
+    { $tnew=""; }
+  # print ("This is tnew:  $itm_code    $tnew\n"); 
+  if ($crv_amt> 0) {
+    #$crv_note="+ CRV ".$crv_amt; }
+    $crv_note="+ CRV "; }
+  else {
+    $crv_note=""; }
+  #calculate the printed mvmt to be 2X the weekly mvmt to print a 2 week mvmt
+  #if mvmt is <3 then print 3
+  if ($mvmt_last_week > 1) {
+    $mvmt_last_week=$mvmt_last_week*2; 
+  } 
+  else  {
+    $mvmt_last_week=3;
+  } 
+  #### END CALCULATIONS
+  
+  #  MULTIPLE TAG PRINTING LOOP
+  while ($ttag_quan > 0) {
+    #$page_header_preset=0;
+    &$placement_sub;  # places text in approriate locations
+
+    if ($ccol < $ncol ) {
+      # print logfile ("$colwidth 0 translate\n");
+      print outfile ("$colwidth 0 translate\n");
+      $ccol=$ccol+1; }
+    else {
+      if ($crow < $nrow) {
+        $ccol=1;
+        $crow=$crow+1;
+        # printf logfile ("%0.2f %0.2f translate\n",(-1*$ncol*$colwidth),(-1*$rowheight)); 
+        printf outfile ("%0.2f %0.2f translate\n",(-1*($ncol-1)*$colwidth),(-1*$rowheight));}
+
+      else {
+        $ccol=1;	#Page is full, reset current column and row, print page
+        $crow=1;
+        print outfile ("showpage\n");
+	if ($ttag_quan>0) {
+	  #### test
+	  #print outfile ("printing page header after ttag_quan>0): ",$ttag_quan);
+	  &pageheader;
+	  #$page_header_preset=1;
+        }
+      }
+    }  
+    $ttag_quan=$ttag_quan-1;
+  }
+}
+if (($ccol !=1) || ($crow!=1)) {  #Eliminating Blank Page from printing
+  print outfile ("showpage\n");
+}
+print outfile ("%%EOF\n");
+
+### End of Main Program
+
+
+### Listings of Subroutines
+sub pageheader {
+  &placetext(".6 inch", "10.6 inch", HelvFontStd, "Filename: $filename                            Page $page_no", show);
+  
+  #$page_no=$page_no+1;
+  #printf(" header_sub is : %s\n",$header_sub);
+  #sleep 2;
+  &$header_sub;   #print out header
+}
+
+sub checkdigit {
+  local ($order_no) = @_;
+  local ($corder_no, $len_order_no, $chck_digit, $cchck_digit, $coddstr);
+  local ($oddstr, $cevenstr, $tcount, $oddsum, $evensum, $totsum);
+
+  #printf(" order no is : %s\n",$order_no);
+  $corder_no = sprintf("%s",$order_no);
+  $len_order_no= length($corder_no);
+  #print ("Length of order no: $len_order_no \n");
+  $tcount=$len_order_no;
+  #print ("tcount: $tcount \n");
+  $coddstr="";
+  while ($tcount > 0) {
+    $coddstr=substr($corder_no,($tcount-1),1).$coddstr;
+      #print ("Coddstr: $coddstr \n");
+     $tcount=$tcount-2; }
+
+  $tcount=$len_order_no-1;
+  $cevenstr="";
+  while ($tcount > 0 ) {
+    $cevenstr=substr($corder_no,($tcount-1),1).$cevenstr;
+    #print ("Cevenstr: $cevenstr\n");
+    $tcount=$tcount-2; }
+  $coddstr=$coddstr*2;
+  $tcount=length($coddstr);
+  #print ("oddstrx2 : $coddstr\n");
+  #print ("tcount: $tcount\n");
+  $oddsum=0;
+  while ($tcount > 0 ) {
+    $oddsum=$oddsum+substr($coddstr,($tcount-1),1);
+    $tcount=$tcount-1; }
+  #print ("Sum of odd string:  $oddsum\n");
+
+
+  $tcount=length($cevenstr);
+  $evensum=0;
+  #print ("Cevenstr: $cevenstr\n");
+  #print ("tcount: $tcount\n");
+  while ($tcount>0) {
+    $evensum=$evensum+substr($cevenstr,($tcount-1),1);
+    $tcount=$tcount-1; }
+  #print ("Sum of even string: $evensum");
+  $totsum=$evensum+$oddsum;
+
+  #print ("TOTAL SUM: $totsum\n");
+  $totsum=$totsum % 10;
+  #print ("TOTAL MOD 10 SUM: $totsum\n");
+  $totsum=10-$totsum;
+  $cchck_digit=$totsum % 10;
+  # next line had corder_no clipped before ccheck_digit
+  $corder_no = $corder_no.$cchck_digit;
+  #print ("Number w/ Check Digit: $corder_no\n");
+  return ($corder_no);
+}
+
+sub zerofill {
+  local ($order_no, $f_width)=@_;
+  local ($fill_no, $cur_count, $tans);
+  $cur_count=0;
+  $fill_no= $f_width-length($order_no);
+  while ($cur_count<$fill_no) {
+    # next line had far right order_no clipped
+    $order_no="0".$order_no;
+#    print ("$order_no\n");
+    $cur_count=$cur_count+1; }
+  return($order_no);
+}
+
+#### Large tag routines
+sub l_fonts { 
+  print outfile ("/centershow\n");
+  print outfile ("{dup stringwidth pop 0 exch sub 2 div 0 rmoveto show} def\n");
+# Font used for < 10 character descriptions
+  &makefont("HelvFont10","Helvetica-Bold",20,20);
+# Font used for < 20 character descriptions
+  &makefont("HelvFont20","Helvetica-Bold",20,18);
+# Font used for < 30 character descriptions
+  &makefont("HelvFont30","Helvetica-Bold",20,16);
+# Font used for < 40 character descriptions
+  &makefont("HelvFont40","Helvetica-Bold",20,14);
+# Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",15,15);
+# Font used for Bold Standard text 
+  &makefont("HelvFontBStd","Helvetica-Bold",15,15);
+# Font used for Bold Italic Standard text 
+  &makefont("HelvFontBIStd","Helvetica-BoldItalic",18,18);
+# Font used for Large text 
+  &makefont("HelvFontLarge","Helvetica-Bold",12,12);
+# Font used for Medium text 
+  &makefont("HelvFontMed","Helvetica",13,11);
+# Font used for Small text 
+  &makefont("HelvFontSmall","Helvetica",11,8);
+# Font used for Small text 
+  &makefont("HelvFontSmallBold","Helvetica-Bold",11,8);
+# Font used for Bold Medium text 
+  &makefont("HelvFontBMed","Helvetica-Bold",13,13);
+# Font used for Price 
+  &makefont("HelvPrice","Helvetica-Bold",48,36);
+# Font used for Savings 
+  &makefont("HelvSave","Helvetica-Bold",15,15);
+  #&makefont("HelvSave","Helvetica-Bold",20,20);
+# Font used for Saying 
+  &makefont("HelvSaying","Helvetica-Bold",15,10);
+# Font used for SmallTitle 
+  &makefont("HelvSmallTitle","Helvetica",12,12);
+# Font used for Barcode
+  &makefont("BarFont","Plessey",16,16);
+# Other PS definitions
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 740 def\n");
+  print outfile ("/LS 18 def\n");
+  print outfile ("/VM 20 def\n");
+}
+
+sub l_header {
+#  #    -- Page header in First page header
+#  print outfile ("7.8 inch 0 inch translate\n");
+#  print outfile ("90 rotate\n");
+#  print outfile ("0 inch 5.00 inch translate\n");
+
+# Page header in First page header
+  #print outfile ("0 inch 10.5 inch translate\n");
+  print outfile ("0 0 moveto\n");
+  print outfile ("90 rotate\n");
+  #print outfile ("0 inch 5.60 inch translate\n");
+  #print outfile (".125 inch -2.75 inch translate\n");
+  print outfile (".125 inch -2.90 inch translate\n");
+# Set Column and row variables
+  if ($page_no == 1) {
+    $nrow=3;
+    $ncol=2;
+    $rowheight= 179;
+    #$rowheight= 176;
+    $colwidth=  370;
+    $centadj= 15;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+    
+  }
+  $page_no=$page_no+1;
+}
+
+sub l_placement {
+  #width = 340, Height=140 
+  #&placetext(LS, 128, $descfont, $tdesc, show);
+  #&placetext(105, 145, HelvSaying, $tagtype_str1, show);
+  #&placetext(105, 130, HelvSaying, $tagtype_str2, show);
+  &placetext(LS, 100, HelvFont40, $titemdesc1, show);
+  &placetext(LS,  80, HelvFont40, $titemdesc2, show);
+  &placetext(LS, 65, HelvFontSmall, "$tcase_pack   $titem_size $item_meas", show);
+  #&placetext(115, 65, HelvFontSmall, "$titem_size $titem_meas", show);
+  &placetext(LS, 55, HelvFontSmall, "$tdate  $tnew", show);  #Date 
+  if ($tnew eq "") {
+     &placetext(115, 55, HelvFontSmall, "mv:$mvmt_last_week", show);
+  }
+  &placetext(LS, 45, HelvFontSmall, "Aisle:  $aisle", show);  #Aisle 
+  &placetext(LS, 35, HelvFontSmall, "Dept: $dept / $sub", show);  #Dept/Sub 
+
+
+  &placetext(230, 100,  HelvSmallTitle, "Our Low Price", show);
+  &placetext(270, 53, HelvPrice, $tcprice, centershow);
+  #&placetext(230, "$prlocadj sub 53 ", HelvPrice, $tcprice, show);
+  &placetext(280, 48, HelvFontBStd, $crv_note, show);
+
+  &placetext(115, 45, HelvFontSmall, $twhse, show);
+  &placetext(115 ,35, HelvFontSmall, $titm_code, show);
+  &placetext(115, 25, HelvFontSmallBold, $torder_no, show);
+
+  #if ($chain eq "F") {
+  #  if ($ad_end!="        ") {
+  #    #printf(" Printing Diamonds to indicate tag is an ad tag\n");
+  #    #&placetext(310, 138, BarFont, "DDD", show);
+  #    &placetext(330, 138, BarFont, "DD", show);
+  #  }
+  #}
+  
+  if ($tagtype eq "h") {
+    print outfile ("gsave 282 92 translate 42 rotate \n");
+    &placetext(0 ,0, HelvSaying, $tagtype_str3, show);
+    &placetext(0, -13, HelvSaying, $tagtype_str4, show);
+    print outfile ("grestore \n");
+  }
+  # Barcode 
+  if ($whse==99) {
+    &placetext(LS, 7, HelvFontBStd, DIRECT, show); 
+    }
+  else {
+    $border_no=&checkdigit($torder_no);
+    $border_no=&checkdigit($border_no);
+    &placetext(LS, 7, BarFont, "[$border_no]", show);
+  }
+
+  # Supermarket Price
+  &placetext(220, 152,  HelvSmallTitle, "Supermarket Price", show);
+  &placetext(260, 134, HelvFontBStd, $tcsmprice, show);
+
+  # Save Amount
+  &placetext(245, 23,  HelvSmallTitle, "You Save", show);
+  &placetext(260, 5,  HelvSave, $tcsave, show);
+
+  # Price Per Unit
+  &placetext(LS, 25, HelvFontSmall, "$tcpriceper per $titem_meas", show);
+    #&placetext(LS, 30, HelvFontBStd, $tcpriceper, show);
+    #&placetext(95, 59, HelvFontMed, $titem_meas, show);
+  # Comment out box
+  #&priceperbox;    #Draw price per unit box
+}
+
+##
+#### Small tag subroutines
+##
+
+sub s_fonts {
+# Font used for < 10 character descriptions
+  &makefont("HelvFont10","Helvetica-Bold",17,18);
+# Font used for < 20 character descriptions
+  &makefont("HelvFont20","Helvetica-Bold",17,13);
+# Font used for < 30 character descriptions
+  &makefont("HelvFont30","Helvetica-Bold",17,8);
+# Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",8,8);
+# Font used for Bold Standard text 
+  &makefont("HelvFontBStd","Helvetica-Bold",8,8);
+# Font used for Bold Italic Standard text 
+  &makefont("HelvFontBIStd","Helvetica-BoldItalic",10,11);
+# Font used for Large text 
+  &makefont("HelvFontLarge","Helvetica-Bold",12,12);
+# Font used for Medium text 
+  &makefont("HelvFontMed","Helvetica",10,11);
+# Font used for Bold Medium text 
+  &makefont("HelvFontBMed","Helvetica-Bold",13,13);
+# Font used for Price 
+  &makefont("HelvPrice","Helvetica-Bold",50,32);
+# Font used for Barcode Font 
+  &makefont("BarFont","Plessey",14,14);
+# Other PS Definitions
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 740 def\n");
+  print outfile ("/LS 27 def\n");
+  print outfile ("/VM 20 def\n");
+}
+
+sub s_header {
+  #    -- Page header in First page header
+  print outfile ("13.7 661 translate\n");
+    
+  #    -- Set Column and row variables
+  if ($page_no == 1) {
+    $nrow=8;
+    $ncol=3;
+    $rowheight= 90;
+    $colwidth=  184;
+    $centadj= 10;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+
+  }
+  $page_no=$page_no+1;
+}
+
+sub s_placement {
+  &placetext(LS, 61, $descfont, $tdesc, show);
+  &placetext(LS, 50, HelvFontStd, $titm_code, show);
+  &placetext(LS, 41, HelvFontStd, "$tcase_pack    $tsitem_pack$titem_size $titem_meas", show);
+  &placetext(155, 0, HelvFontStd, "whse:", show);
+  &placetext("70 $prlocadj sub", 18, HelvPrice, $tcprice, rightshow);
+  &placetext(176, 0, HelvFontLarge, $twhse, show);
+  &placetext(LS, 14, HelvFontMed, $torder_no, show);
+
+  if ($whse==99) {
+    &placetext(LS, 0, HelvFontBStd, DIRECT, show);
+  }
+  else {
+    $border_no=&checkdigit($torder_no);
+
+    ### begmod ggw 07/24/01   VMC only uses one check digit ###
+    if ($vendor_code ne "M00033O") {
+      $border_no=&checkdigit($border_no);}
+   ### endmod ggw 07/24/01
+
+    &placetext(LS, "3 add -1", BarFont, "[$border_no]", show);
+  }
+# Price Per Unit
+  &placetext(LS, 32, HelvFontBStd, "$tcpriceper per $titem_meas", show);
+# Date
+  &placetext(LS, "18 add 24", HelvFontStd, "$tdate $tnew", show);
+}
+
+##
+#### Tiny tag subroutines
+##
+sub t_fonts {
+# Font used for < 10 character descriptions
+  &makefont("HelvFont10","Helvetica-Bold",17,13);
+# Font used for < 20 character descriptions
+  &makefont("HelvFont20","Helvetica-Bold",17,10);
+# Font used for < 30 character descriptions
+  &makefont("HelvFont30","Helvetica-Bold",17,6.6);
+# Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",8,8);
+# Font used for Bold Standard text 
+  &makefont("HelvFontBStd","Helvetica-Bold",8,8);
+# Font used for Bold Italic Standard text 
+  &makefont("HelvFontBIStd","Helvetica-BoldItalic",10,11);
+# Font used for Large text 
+  &makefont("HelvFontLarge","Helvetica-Bold",12,12);
+# Font used for Medium text 
+  &makefont("HelvFontMed","Helvetica",10,11);
+# Font used for Bold Medium text 
+  &makefont("HelvFontBMed","Helvetica-Bold",13,13);
+# Font used for Price 
+  &makefont("HelvPrice","Helvetica-Bold",50,28);
+# Font for Multi Unit 
+  &makefont("HelvMult","Helvetica-Bold",35,16);
+# Font used for Barcode Font 
+  &makefont("BarFont","Plessey",14,14);
+# Other PS Definitions
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 745 def\n");
+#  begmod-ggw-7/18/98- changed LS from 5 to 10
+  print outfile ("/LS 5 def\n");
+#  print outfile ("/LS 18 def\n");
+  print outfile ("/VM 20 def\n");
+}
+
+sub t_header {
+
+# Page header in First page header
+  #print outfile ("13.7 657 translate\n");
+  print outfile ("0.25 inch 9.33 inch translate\n");
+  #print outfile ("0.25 inch 9.13 inch translate\n");
+  #print ("Page: $page_no\n");
+  if ($page_no == 1) {
+    # Set Column and row variables
+    $nrow=8;
+    $ncol=4;
+    #87 for ms711 printer
+    $rowheight= 87;
+    #87.9 for m640 printer 
+    #$rowheight= 87.9;   
+    $colwidth=  148;
+    $centadj= 10;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+    }
+  $page_no=$page_no+1;
+}
+
+sub t_placement {
+  &placetext(LS, 61, $descfont, $tdesc, show);
+  &placetext(LS, 53, HelvFontStd, $titm_code, show);
+  #&placetext(LS, 45, HelvFontStd, "$tcase_pack    $tsitem_pack$titem_size $titem_meas", show);
+  &placetext(LS, 45, HelvFontBStd, "$tcase_pack",show);
+  &placetext(LS, "15 add 45", HelvFontStd, "$tsitem_pack$titem_size $titem_meas", show);
+  if ($chain eq "F") {
+    &placetext(LS, 38, HelvFontStd, "Dept: $dept / $sub", show);  #Dept/Sub 
+    &placetext(LS, 23, HelvFontBStd, $twhse, show);
+    if ($tnew eq "") {
+       &placetext("LS 35 add", 30, HelvFontStd, "mv:$mvmt_last_week", show);
+    }
+    if ($ad_end!="        ") {
+      #printf(" Printing Diamonds to indicate tag is an ad tag\n");
+      #&placetext("LS 85  add", "3 add -1", BarFont, "DDD", show);
+      &placetext("LS 100  add", "3 add -1", BarFont, "DD", show);
+    }
+  }
+  elsif ($chain eq "R") {
+    &placetext(LS, 38, HelvFontStd, "Dept: $dept / $sub", show);  #Dept/Sub 
+    &placetext(LS, 23, HelvFontStd, $vendor_code, show);
+  }
+  if ($nforpricing==0) {
+    #&placetext("18 $prlocadj sub", 21, HelvPrice, $tcprice, rightshow);
+    &placetext(135, 21, HelvPrice, $tcprice, rshow);
+  }
+  else {
+    &placetext(135, 21, HelvPrice, $tcnfor_price, rshow); 
+    #calc length of tcnfor_price
+    #print outfile ("$tcnfor_price stringwidth pop");
+    &placetext("135 ($tcnfor_price) stringwidth pop sub",34, HelvMult, $tcnfor_unt, rshow); 
+  }
+  &placetext(LS, 14, HelvFontMed, $torder_no, show);
+
+  if ($whse==99) {
+    &placetext(LS, 0, HelvFontLarge, DIRECT, show);
+  }
+  else {
+    if ($chain eq "F") {
+      $border_no=&checkdigit($torder_no);
+      $border_no=&checkdigit($border_no);
+    }
+    elsif ($chain eq "R") {
+      $border_no=&checkdigit($torder_no);
+    } 
+    &placetext(LS, "3 add -1", BarFont, "[$border_no]", show);
+  }
+# Price Per Unit
+  &placetext(LS, "72 add 14", HelvFontBStd, "$tcpriceper per $titem_meas", show);
+# Date
+  &placetext(LS, 30, HelvFontStd, "$tdate $tnew", show);
+# Aisle
+  &placetext(LS, "49 add 23", HelvFontStd, "$aisle", show);  #Aisle 
+}
+sub e_fonts {
+  # Font used for < 10 character descriptions
+  &makefont("HelvFont10","Helvetica-Bold",20,16);
+  # Font used for < 20 character descriptions
+  &makefont("HelvFont20","Helvetica-Bold",16,12);
+  # Font used for < 30 character descriptions
+  &makefont("HelvFont30","Helvetica-Bold",12,8);
+  # Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",15,15);
+  # Font used for Bold Standard text 
+  &makefont("HelvFontBStd","Helvetica-Bold",13,13);
+  # Font used for Bold Italic Standard text 
+  &makefont("HelvFontBIStd","Helvetica-BoldItalic",18,18);
+  # Font used for Large text 
+  &makefont("HelvFontLarge","Helvetica-Bold",13,11);
+  # Font used for Small text 
+  &makefont("HelvFontSmall","Helvetica",6,7);
+  # Font used for Medium text 
+  &makefont("HelvFontMed","Helvetica",11,9);
+  # Font used for Bold Medium text 
+  &makefont("HelvFontBMed","Helvetica-Bold",11,8);
+  # Font used for Price 
+  &makefont("HelvPrice","Helvetica-Bold",78,39);
+  # Font used for Savings 
+  &makefont("HelvSave","Helvetica-Bold",44,30);
+  # Font used for Regular Price 
+  &makefont("HelvReg","Helvetica-Bold",30,22);
+  # Font used for Saying 
+  &makefont("HelvSaying","Helvetica-Bold",15,10);
+  # Font used for Barcode
+  &makefont("BarFont","Plessey",16,16);
+  # Font used for Limit Qty 
+  &makefont("HelvLimit","Helvetica-Bold",22,16);
+  # Font used for After Limit Price 
+  &makefont("HelvAfterLimit","Helvetica-BoldItalic",15,12);
+  # Other PS definitions
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 740 def\n");
+  print outfile ("/LS 15 def\n");
+  print outfile ("/VM 20 def\n");
+}
+### e_header for Raleys eight up ad tags  ###
+sub e_header {
+#  #    -- Page header in First page header
+#  print outfile ("7.8 inch 0 inch translate\n");
+#  print outfile ("90 rotate\n");
+#  print outfile ("0 inch 5.00 inch translate\n");
+
+# Page header in First page header
+  #print outfile ("0 inch 10.5 inch translate\n");
+  print outfile  ("% Raleys format tags\n");
+  print outfile ("0 0 moveto\n");
+  print outfile ("90 rotate\n");
+  #print outfile ("0 inch 5.60 inch translate\n");
+  #print outfile (".50 inch -4.15 inch translate\n");
+  print outfile (".32 inch -4.30 inch translate\n");
+# Set Column and row variables
+  if ($page_no == 1) {
+    $nrow=2;
+    $ncol=4;
+    $rowheight= 279;
+    $colwidth=  181;
+    $centadj= 15;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+  }
+  $page_no=$page_no+1;
+}
+
+sub e_placement {
+  &placetext(LS, 259, $descfont, $tdesc, show);
+  &placetext(LS, 240, HelvFontMed, $titm_code, show);
+  &placetext(LS, 230, HelvFontMed, "$tcase_pack   $tsitem_pack$titem_size $titem_meas", show);
+  &placetext(LS, 220, HelvFontMed, "$vendor_code", show);  # vendor
+  &placetext(LS, 208, HelvFontBStd, $torder_no, show);
+  if($tagtype eq "b") { 
+    # 8 up BOGO tags;
+    #&placetext(45, 222, HelvFontSmall, "Ad->:$ad_end", show);  # ad_end
+    &placetext(85, 245, HelvFontSmall, "Aisle:  $aisle", show);  #Aisle 
+    &placetext(125, 245, HelvFontSmall, "$tdate  $tnew", show);  #Date 
+    &placetext(85, 240, HelvFontSmall, "Dept: $dept / $sub", show);  #Dept/Sub 
+    &placetext(50, 210, HelvReg, $tcprice, rightshow);
+  }
+  else {
+    # All other 8 up tags:
+    &placetext(105, 240, HelvFontMed, "$tdate  $tnew", show);  #Date 
+    &placetext(105, 230, HelvFontMed, "Dept: $dept / $sub", show);  #Dept/Sub 
+    &placetext(105, 220, HelvFontMed, "Aisle:  $aisle", show);  #Aisle 
+    &placetext(105, 208, HelvFontMed, "Ad->:$ad_end", show);  # ad_end
+  }
+
+  if ($ad_limit==0) {
+    if($tagtype eq "t" || $tagtype eq "b") { 
+      # Ten for $10 and BOGO tags:
+      # Price Per Unit
+      &placetext(120,192, HelvFontBMed, "$tcpriceper per $titem_meas", show);
+    }
+    else {
+      # Regular ad/bb
+      # Price Per Unit
+      &placetext(0, "$prlocadj sub 45 ", HelvPrice, $tcprice, rightshow);
+      &placetext(-5, 30, HelvFontLarge, "$tcpriceper per $titem_meas", rightshow);
+    }
+  }
+  else  {
+    if($tagtype eq "t" || $tagtype eq "b") {
+      # Ten for $10 and BOGO tags:
+      # Price Per Unit
+      &placetext(70,192, HelvFontBMed, "$tcpriceper per $titem_meas", rightshow);
+    }
+    else {
+      # Regular ad/bb
+      &placetext(0, "$prlocadj sub 47 ", HelvPrice, $tcprice, rightshow);
+      # Price Per Unit
+      placetext(-5, 32, HelvFontLarge, "$tcpriceper per $titem_meas", rightshow);
+      placetext(LS,117, HelvLimit, "Limit:$ad_limit", show); 
+      &drawline(LS,115, 70, 115);
+      &drawline(LS, 26, 120, 26); 
+      &placetext(LS, 10,  HelvAfterLimit, "After Limit: $price", show); 
+      &placetext(65, 215, HelvReg, $tcreg_price, rightshow);
+    }
+  }
+  
+  &placetext(278, 63, HelvSaying, $tagtype_str1, show);
+  &placetext(278, 46, HelvSaying, $tagtype_str2, show);
+  if ($whse==99) {
+    &placetext(LS, 192, HelvFontBStd, DIRECT, show); 
+    }
+  else {
+    $border_no=&checkdigit($torder_no);
+    #$border_no=&checkdigit($border_no);
+    &placetext(LS, 190, BarFont, "[$border_no]", show);
+    #&placetext(LS, 0, HelvFontMed, "+____", show);
+  }
+
+  # Supermarket Price
+  #&placetext(212, 23, HelvFontBStd, $tcsmprice, show);
+
+  # ggw 5/10/2004
+  # Save Amount
+  if($tagtype != "t" && $tagtype != "b") {
+    &placetext(65, 16, HelvSave, $tcreg_save, rightshow);
+  }
+  if($tagtype eq "b") {
+    # 8 up BOGO tags;
+    print outfile ("-90 rotate\n");
+    &placetext(-85, 15, HelvFontSmall, "Ad->:$ad_end", show);  # ad_end
+    print outfile ("90 rotate\n");
+  }
+
+}
+sub a_fonts {
+  # Font used for < 10 character descriptions
+  &makefont("HelvFont10","Helvetica-Bold",24,20);
+  # Font used for < 20 character descriptions
+  &makefont("HelvFont20","Helvetica-Bold",24,16);
+  # Font used for < 30 character descriptions
+  &makefont("HelvFont30","Helvetica-Bold",24,12);
+  # Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",15,15);
+  # Font used for Bold Standard text 
+  &makefont("HelvFontBStd","Helvetica-Bold",13,13);
+  # Font used for Bold Italic Standard text 
+  &makefont("HelvFontBIStd","Helvetica-BoldItalic",18,18);
+  # Font used for Large text 
+  &makefont("HelvFontLarge","Helvetica-Bold",13,11);
+  # Font used for Medium text 
+  &makefont("HelvFontMed","Helvetica",11,9);
+  # Font used for Bold Medium text 
+  &makefont("HelvFontBMed","Helvetica-Bold",13,13);
+  # Font used for Price 
+  &makefont("HelvPrice","Helvetica-Bold",78,39);
+  # Font used for Savings 
+  &makefont("HelvSave","Helvetica-Bold",44,30);
+  # Font used for Regular Price 
+  &makefont("HelvReg","Helvetica-Bold",30,22);
+  # Font used for Saying 
+  &makefont("HelvSaying","Helvetica-Bold",15,10);
+  # Font used for Barcode
+  &makefont("BarFont","Plessey",16,16);
+  # Font used for Limit Qty 
+  &makefont("HelvLimit","Helvetica-Bold",28,20);
+  # Font used for After Limit Price 
+  &makefont("HelvAfterLimit","Helvetica-BoldItalic",15,15);
+  # Other PS definitions
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 740 def\n");
+  print outfile ("/LS 15 def\n");
+  print outfile ("/VM 20 def\n");
+}
+### a_header for Raleys ad tags  ###
+sub a_header {
+#  #    -- Page header in First page header
+#  print outfile ("7.8 inch 0 inch translate\n");
+#  print outfile ("90 rotate\n");
+#  print outfile ("0 inch 5.00 inch translate\n");
+
+# Page header in First page header
+  #print outfile ("0 inch 10.5 inch translate\n");
+  print outfile  ("% Raleys format tags\n");
+  print outfile ("0 0 moveto\n");
+  print outfile ("90 rotate\n");
+  #print outfile ("0 inch 5.60 inch translate\n");
+  #print outfile (".50 inch -4.15 inch translate\n");
+  print outfile (".50 inch -4.30 inch translate\n");
+# Set Column and row variables
+  if ($page_no == 1) {
+    $nrow=2;
+    $ncol=3;
+    $rowheight= 260;
+    $colwidth=  234;
+    $centadj= 15;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+  }
+  $page_no=$page_no+1;
+}
+
+sub a_placement {
+  &placetext(LS, 234, $descfont, $tdesc, show);
+  &placetext(LS, 220, HelvFontMed, $titm_code, show);
+  &placetext(LS, 210, HelvFontMed, "$tcase_pack   $tsitem_pack$titem_size $titem_meas", show);
+  &placetext(LS, 200, HelvFontMed, "$vendor_code", show);  # vendor
+  #&placetext(LS, 200, HelvFontMed, $twhse, show);
+  &placetext(LS, 190, HelvFontBStd, $torder_no, show);
+  &placetext(108, 220, HelvFontMed, "$tdate  $tnew", show);  #Date 
+  &placetext(108, 210, HelvFontMed, "Dept: $dept / $sub", show);  #Dept/Sub 
+  &placetext(108, 200, HelvFontMed, "Aisle:  $aisle", show);  #Aisle 
+  &placetext(108, 190, HelvFontMed, "Ad End:$ad_end", show);  # ad_end
+
+  if ($ad_limit==0) {
+    &placetext(28, "$prlocadj sub 20 ", HelvPrice, $tcprice, rightshow);
+    # Price Per Unit
+    #&placetext(60, 5, HelvFontLarge, "$tcpriceper per $titem_meas", show);}
+    &placetext(28, 5, HelvFontLarge, "$tcpriceper per $titem_meas", rightshow);}
+  else  {
+    &placetext(28, "$prlocadj sub 47 ", HelvPrice, $tcprice, rightshow);
+    # Price Per Unit
+    &placetext(28, 32, HelvFontLarge, "$tcpriceper per $titem_meas", rightshow);
+    &placetext(150,81, HelvLimit, "LIMIT:$ad_limit", show); 
+    &drawline(150,77, 225, 77);
+    &drawline(LS, 26, 140, 26); 
+    &placetext(LS, 8,  HelvAfterLimit, " After Limit: $price", show); 
+  }
+  &placetext(115, 193, HelvReg, $tcreg_price, rightshow);
+  
+  &placetext(278, 63, HelvSaying, $tagtype_str1, show);
+  &placetext(278, 46, HelvSaying, $tagtype_str2, show);
+  if ($whse==99) {
+    &placetext(LS, 165, HelvFontBStd, DIRECT, show); 
+    }
+  else {
+    $border_no=&checkdigit($torder_no);
+    #$border_no=&checkdigit($border_no);
+    &placetext(LS, 173, BarFont, "[$border_no]", show);
+    #&placetext(LS, 0, HelvFontMed, "+____", show);
+  }
+
+  # Supermarket Price
+  #&placetext(212, 23, HelvFontBStd, $tcsmprice, show);
+
+  # Save Amount
+  &placetext(115, 14, HelvSave, $tcreg_save, rightshow);
+}
+
+sub g_header {
+  #    -- Page header in First page header
+  print outfile ("0 inch 4.90 inch translate\n");  # letter size portrait 
+    
+  #    -- Set Column and row variables
+  if ($page_no == 1) {
+    $nrow=2;
+    $ncol=1;
+    $rowheight= 5.125 * 72;
+    $colwidth= 0;
+    &start_tag_position($start_tag_no,$ncol,$nrow,$colwidth,$rowheight);
+  }
+  $page_no=$page_no+1;
+}
+sub g_fonts {
+
+  print outfile ("/rightshow\n");
+  print outfile ("{dup stringwidth pop 0 exch sub 0 rmoveto show} def\n");
+
+  print outfile ("/centershow\n");
+  print outfile ("{dup stringwidth pop 0 exch sub 2 div 0 rmoveto show} def\n");
+
+  print outfile ("/inch {72 mul } def\n");
+  print outfile ("/TOP 740 def\n");
+  print outfile ("/LS 27 def\n");
+  print outfile ("/VM 20 def\n");
+# Font used for standard text 
+  &makefont("HelvFontStd","Helvetica",15,15);
+# Font used for standard text
+  &makefont("HelvFontStd","Helvetica",15,15);
+# Font used for "You Save"
+  &makefont("HelvSaveT","Helvetica-Bold",36,16);
+# Font used for "Savings amount"
+  &makefont("HelvSave","Helvetica-Bold",60,36);
+# Font used for Medium text
+  #&makefont("HelvFontMed","Helvetica",19,11);
+  &makefont("HelvFontMed","Helvetica",30,13);
+# Font used for Bold Medium text
+  &makefont("HelvFontBMed","Helvetica-Bold",13,13);
+# Font used for Bold Standard text
+  #&makefont("HelvFontBStd","Helvetica-Bold",23,15);
+  &makefont("HelvFontBStd","Helvetica-Bold",54,30);
+  #-- Set size and position variables
+
+  $fonttype1="Helvetica-Bold";
+  $fonttype2="Helvetica";
+  $ttagno=0;
+  $pageno=0;
+
+  $shdesc1=72;
+  $shdesc2=32;
+  $shdesc3=20;
+  $shdesc4=20;
+  $shdesc5=20;
+  $shdesc6=20;
+  $shmeas=50;
+  if ($tagtype eq "a") {
+     $shnfor_unt=117;
+     $shprice=117;
+  }
+  else {
+     $shnfor_unt=155;
+     $shprice=155;
+  }
+  $shorder_no=0;
+  $shitm_code=18;
+  $shdate=0;
+  $shtagtype_str3=18;
+
+  # px, py are position x axis and y axis 
+  if ($tagtype eq "a") {
+    $pydesc1=3.00;
+  }
+  else {
+    #$pydesc1=3.70;
+    $pydesc1=3.50;
+  }
+    $pxdesc1=4.75;
+  $pxdesc2=4.75;
+  $pydesc2=3.10;
+  $pxdesc3=0.75;
+  $pydesc3=0.75;
+  $pxdesc4=0.75;
+  $pydesc4=0.40;
+  $pxdesc5=0.75;
+  $pydesc5=0.05;
+  $pxdesc6=0.75;
+  $pydesc6=0.00;
+  $pxmeas=5.80;
+  $pxnfor_unt=3.00;
+  if ($tagtype eq "a") {
+    $pymeas=1.7;
+    $pynfor_unt=1.7;
+    $pyprice=1.7;
+    $pycrv=1.70;
+    #$pyitm_code=4.30;
+    $pyitm_code=0.40;
+  }
+  else {
+    $pymeas=1.20;
+    $pynfor_unt=1.20;
+    $pyprice=1.20;
+    $pycrv=1.20;
+    #$pyitm_code=5.00;
+    $pyitm_code=0.40;
+  }
+  $pxprice=5.80;
+  $pxitm_code=8.00;
+  $pxdate=0.00;
+  $pydate=0.00;
+  $pxtagtype_str3=3.70;  # Location of Born on
+  $pytagtype_str3=1.10;
+  $pxtagtype_str4=0.00;
+  $pytagtype_str4=-0.25;
+  $pxcrv=6.30;
+#  lbwidth is width of lb, prmvifmult is for price to move if multiple price
+  $lbwidth=0.80;
+  $prmvifmult=1.80;
+  $fontcomp=1.0;
+}
+
+sub g_placement {
+  ### SignDesc1 is a name used for the current font, the definition for 
+  ### for SignDesc1 changes for based on the makefont parameters
+
+  ## Description Field 
+  $fontcomp=&sign_comp($shdesc1,$tdesc);
+  &makefont("SignDesc1","Helvetica-Bold",$shdesc1,$fontcomp);
+#jptemp
+  &placetext(sprintf("%0.2f inch",$pxdesc1),sprintf("%0.2f inch",$pydesc1),"SignDesc1",$tdesc,centershow);
+
+  if ($tagtype ne "a") {
+     ## Sign Description Field 2
+     $fontcomp=&sign_comp($shdesc2,$tdesc_sign2);
+     &makefont("SignDesc1","Helvetica-Bold",$shdesc2,$fontcomp);
+     &placetext(sprintf("%0.2f inch",$pxdesc2),sprintf("%0.2f inch",$pydesc2),"SignDesc1",$tdesc_sign2,centershow);
+  }    
+
+  $tmeas=$item_meas;
+  if ($tmeas eq "PLB") { $tmeas = "LB"; }
+    elsif ($tmeas eq "PEA") { $tmeas="EA";}
+    else { $tmeas=""; }
+   
+  # Supermarket Price
+  # 20130416 ggw mod to print supermartet price verbiage.
+  # 20141022 ggw mod to remove supermarket price and save amount
+  #if ($tagtype ne "a") {
+  #  &placetext(".5  inch",".53 inch", HelvFontMed, "Supermarket Price:", show);
+  #  &placetext("2.2 inch",".53 inch", HelvFontBStd, $tcsmprice, show);
+  #}
+  #else {
+  #   &placetext("4.6 inch",".40 inch", HelvFontBStd, $tcsmprice, show);
+  #}
+
+  # Save Amount
+  # 20141022 ggw mod to remove supermarket price and save amount
+  #if ($tagtype ne "a") {
+  #   &placetext("5.5 inch"," .53 inch", HelvSaveT, "YOU SAVE", show);
+  #   &placetext("6.8 inch"," .53 inch", HelvSave, "$tgsave", show);
+  #}
+  #else {
+  #   &placetext("7.5 inch"," .40 inch", HelvSave, "$tgsave", centershow);
+  #}
+
+  # print price
+  # price is > .99 and not using multiple pricing
+  if ($price > 0 ) {  
+    #print("price > 0, print single pricing\n");
+    if ($price > .99) {
+      $tprice = sprintf("%0.2f",$price); }
+    else { 
+      $tprice= sprintf("%0.0f$cent",($price*100));
+    }
+    &makefont("SignDesc1","Helvetica-Bold",sprintf("%d",$shprice),sprintf("%d",$shprice));
+    &placetext(sprintf("%0.2f inch",$pxprice),sprintf("%0.2f inch",$pyprice),"SignDesc1",$tprice,rightshow);
+    &makefont("SignDesc1","Helvetica-Bold",sprintf("%d",$shmeas),sprintf("%d",$shmeas));
+    &placetext(sprintf("%0.2f inch",$pxmeas),sprintf("%0.2f inch",$pymeas),"SignDesc1",$tmeas,show);
+    &placetext(sprintf("%0.2f inch",$pxcrv),sprintf("%0.2f inch",$pycrv),"SignDesc1",$crv_note,show);
+
+  }
+  else { 
+    #print("price is 0, print multiple pricing \n");
+    #printf("nforprice is %f \n",$nfor_price);
+    if ($nfor_price > .99) {
+      $tsprice=sprintf("%0.2f",$nfor_price); }
+    else  {
+      $tsprice=sprintf("%d$cent",($nfor_price*100)); 
+    }
+    $tpxprice=($pxprice-$prmvifmult);
+    ### print FOR 
+    print outfile ("/Helvetica-Bold findfont ");
+    print outfile ("24 scalefont setfont ");
+    if ($tagtype ne "a") {
+       print outfile ("3.38 inch 3.25 inch moveto ");
+       print outfile ("(F) show ");
+       print outfile ("3.38 inch 2.90 inch moveto ");
+       print outfile ("(O) show ");
+       print outfile ("3.38 inch 2.55 inch moveto ");
+       print outfile ("(R) show\n");
+    }
+    else {
+       print outfile ("3.38 inch 2.45 inch moveto ");
+       print outfile ("(F) show ");
+       print outfile ("3.38 inch 2.10 inch moveto ");
+       print outfile ("(O) show ");
+       print outfile ("3.38 inch 1.75 inch moveto ");
+       print outfile ("(R) show\n");
+    }
+      
+    if ($tmeas eq "LB") {
+      $tpxnfor_unt=($pxnfor_unt-$lbwidth);
+      &makefont("SignDesc1","Helvetica-Bold",$shmeas,$shmeas);
+      &placetext(sprintf("%0.2f inch",($tpxnfor_unt)),sprintf("%0.2f inch",$pynfor_unt),"SignDesc1",$tmeas,show);
+    }
+    else {
+      $tmeas="EA";
+      $tpxnfor_unt=$pxnfor_unt;
+    }
+
+    &makefont("SignDesc1","Helvetica-Bold",$shnfor_unt,$shnfor_unt);
+    &placetext(sprintf("%0.2f inch",($tpxnfor_unt)),sprintf("%0.2f inch",$pynfor_unt),"SignDesc1",$nfor_unt,rightshow);
+
+    &makefont("SignDesc1","Helvetica-Bold",$shprice,$shprice);
+    &placetext(sprintf("%0.2f inch",($tpxprice)),sprintf("%0.2f inch",$pyprice),"SignDesc1",$tsprice,show);
+  }
+  $tsitm_code=sprintf("Code: %s",$titm_code);
+  &makefont("SignDesc1","Helvetica-Bold",$shitm_code,$shitm_code);
+  &placetext(sprintf("%0.2f inch",($pxitm_code)),sprintf("%0.2f inch",$pyitm_code),"SignDesc1",$tsitm_code,rightshow);
+  if ($tagtype eq "h") {
+    ###  print the Born ON  text and date ###
+    &makefont("SignDesc1","Helvetica-Bold",$shtagtype_str3,$shtagtype_str3);
+    printf outfile ("gsave %0.2f inch %0.2f inch translate 10 rotate \n",$pxtagtype_str3, $pytagtype_str3);
+    &placetext(sprintf("%0.2f inch",0),sprintf("%0.2f inch",0),"SignDesc1",$tagtype_str3,show);
+    &placetext(sprintf("%0.2f inch",$pxtagtype_str4),sprintf("%0.2f inch",$pytagtype_str4),"SignDesc1",$tagtype_str4,show);
+    print outfile ("grestore \n");
+  }
+}
+
+#    -- START OF ACTUAL DATA IN OUTPUT FILE
+#     #Actual printing of price and unit
+#
+#
+#
+#
+#
+
+sub sign_comp {
+  local ($fontheight,$desc)=@_;
+  local ($fontcomp);
+
+  if (length($desc)>10) {
+    $fontcomp=sprintf("%0d \n",($fontheight*(10/(length($desc)))*(72/$fontheight)));
+    }
+  else {
+    $fontcomp=sprintf("%0d \n",$fontheight);
+  }
+  return ($fontcomp);
+}
+
+sub makefont {
+  local ($fontname,$psname,$fontheight,$fontcomp) = @_;
+  print outfile ("/$fontname\n");
+  print outfile ("/$psname findfont\n");
+  printf outfile ("[%5.1f 0 0 %5.1f 0 0] makefont def\n",$fontcomp,$fontheight);
+}
+sub placetext {
+  local ($xparam, $yparam, $fontname, $text, $showtype) =@_; 
+    print outfile ("$xparam $yparam moveto ");
+    print outfile ("$fontname setfont ");
+    print outfile ("($text) $showtype \n");
+}
+sub drawline {
+  local ($xstart, $ystart, $xend, $yend) =@_;
+   print outfile ("$xstart $ystart moveto ");
+   print outfile ("$xend $yend lineto ");
+   print outfile ("closepath stroke\n");
+  } 
+
+sub priceperbox {
+#   -- Create boxes
+   print outfile ("%DRAW BOXES\n");
+   print outfile ("27 40 moveto ");
+   print outfile ("351 40 lineto ");
+   print outfile ("closepath\n");
+   print outfile ("27 44 moveto ");
+   print outfile ("127 44 lineto ");
+   print outfile ("127 72 lineto ");
+   print outfile ("27 72 lineto ");
+   print outfile ("closepath\n");
+   print outfile ("stroke\n");
+   #  Box static Text
+   &placetext(132, 28, HelvFontMed, "Supermarket Price:", show);
+   &placetext(37, 59, HelvFontMed, "Price Per", show);
+   &placetext(268, 2, HelvSave, "SAVE $tcsave", show);
+}
+
+sub make_bar_font {
+#  print outfile ("%!PS\n");
+  print outfile ("30 dict\n");
+  print outfile ("begin\n");
+  print outfile ("  /FonName /Plessey def\n");
+  print outfile ("  /FontType 3 def\n");
+  print outfile ("  /FontBBox [ -20 -30 870 830 ] def\n");
+  print outfile ("  /FontMatrix [ 0.001 0 0 0.001 0 0 ] def\n");
+  print outfile ("  \n");
+  print outfile ("  /Encoding 256 array def\n");
+  print outfile ("  0 1 255 {\n");
+  print outfile ("    Encoding exch /.notdef put\n");
+  print outfile ("  } for\n");
+  print outfile ("  \n");
+  print outfile ("  Encoding ([) 0 get /Start put\n");
+  print outfile ("  Encoding (]) 0 get /Stop put\n");
+  print outfile ("  Encoding (0) 0 get /Zero put\n");
+  print outfile ("  Encoding (1) 0 get /One put\n");
+  print outfile ("  Encoding (2) 0 get /Two put\n");
+  print outfile ("  Encoding (3) 0 get /Three put\n");
+  print outfile ("  Encoding (4) 0 get /Four put\n");
+  print outfile ("  Encoding (5) 0 get /Five put\n");
+  print outfile ("  Encoding (6) 0 get /Six put\n");
+  print outfile ("  Encoding (7) 0 get /Seven put\n");
+  print outfile ("  Encoding (8) 0 get /Eight put\n");
+  print outfile ("  Encoding (9) 0 get /Nine put\n");
+  print outfile (" \n");
+  print outfile ("  Encoding (D) 0 get /Diamond put\n");
+  print outfile ("  \n");
+  print outfile ("  /BoundingBoxes 14 dict def \n");
+  print outfile ("  BoundingBoxes begin\n");
+  print outfile ("    /.notdef { 0 0 0 0 } def\n");
+  print outfile ("    /Start   {   0   0   200   1000 } def\n");
+  print outfile ("    /Stop    {   0   0   400   1000 } def\n");
+  print outfile ("    /Zero    {   0   0   800   1000 } def\n");
+  print outfile ("    /One     {   0   0   800   1000 } def\n");
+  print outfile ("    /Two     {   0   0   800   1000 } def\n");
+  print outfile ("    /Three   {   0   0   800   1000 } def\n");
+  print outfile ("    /Four    {   0   0   800   1000 } def\n");
+  print outfile ("    /Five    {   0   0   800   1000 } def\n");
+  print outfile ("    /Six     {   0   0   800   1000 } def\n");
+  print outfile ("    /Seven   {   0   0   800   1000 } def\n");
+  print outfile ("    /Eight   {   0   0   800   1000 } def\n");
+  print outfile ("    /Nine    {   0   0   800   1000 } def\n");
+  print outfile ("    /Diamond {   0   0   800   1000 } def\n");
+  print outfile ("  end\n");
+  print outfile ("  \n");
+  print outfile ("  /Metrics 14 dict def\n");
+  print outfile ("  Metrics begin\n");
+  print outfile ("    /.notdef    0 def\n");
+  print outfile ("    /Start   200 def\n");
+  print outfile ("    /Stop    400 def\n");
+  print outfile ("    /Zero    800 def\n");
+  print outfile ("    /One     800 def\n");
+  print outfile ("    /Two     800 def\n");
+  print outfile ("    /Three   800 def\n");
+  print outfile ("    /Four    800 def\n");
+  print outfile ("    /Five    800 def\n");
+  print outfile ("    /Six     800 def\n");
+  print outfile ("    /Seven   800 def\n");
+  print outfile ("    /Eight   800 def\n");
+  print outfile ("    /Nine    800 def\n");
+  print outfile ("    /Diamond 800 def\n");
+  print outfile ("  end\n");
+  print outfile ("  \n");
+  print outfile ("  /UniqueID 1 def\n");
+  print outfile ("  \n");
+  print outfile ("  /thin1\n");
+  print outfile ("    {0   0    moveto\n");
+  print outfile ("     65  0    lineto\n");
+  print outfile ("     65  1000 lineto\n");
+  print outfile ("     0   1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thin2\n");
+  print outfile ("    {200  0    moveto\n");
+  print outfile ("     265  0    lineto\n");
+  print outfile ("     265  1000 lineto\n");
+  print outfile ("     200  1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thin3\n");
+  print outfile ("    {400  0    moveto\n");
+  print outfile ("     465  0    lineto\n");
+  print outfile ("     465  1000 lineto\n");
+  print outfile ("     400  1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thin4\n");
+  print outfile ("    {600  0     moveto\n");
+  print outfile ("     665  0     lineto\n");
+  print outfile ("     665  1000  lineto\n");
+  print outfile ("     600  1000  lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("\n");
+  print outfile ("  /thick1   \n");
+  print outfile ("    {0   0    moveto\n");
+  print outfile ("     130 0    lineto\n");
+  print outfile ("     130 1000 lineto\n");
+  print outfile ("     0   1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thick2\n");
+  print outfile ("    {200  0    moveto\n");
+  print outfile ("     330  0    lineto\n");
+  print outfile ("     330  1000 lineto\n");
+  print outfile ("     200  1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thick3\n");
+  print outfile ("    {400  0    moveto\n");
+  print outfile ("     530  0    lineto\n");
+  print outfile ("     530  1000 lineto\n");
+  print outfile ("     400  1000 lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("  /thick4\n");
+  print outfile ("    {600  0     moveto\n");
+  print outfile ("     730  0     lineto\n");
+  print outfile ("     730  1000  lineto\n");
+  print outfile ("     600  1000  lineto\n");
+  print outfile ("     closepath\n");
+  print outfile ("     fill\n");
+  print outfile ("     } def\n");
+  print outfile ("\n");
+  print outfile ("  /CharProcs 14 dict def\n");
+  print outfile ("  CharProcs begin\n");
+  print outfile ("    /.notdef { } def\n");
+  print outfile ("    /Start { thick1 } def\n");
+  print outfile ("    \n");
+  print outfile ("    /Stop { thin1 thin2 } def\n");
+  print outfile ("    \n");
+  print outfile ("    /Zero  { thin1 thin2 thin3 thin4 } def\n");
+  print outfile ("\n");
+  print outfile ("    /One   { thin1 thin2 thin3 thick4 } def\n");
+  print outfile ("    \n");
+  print outfile ("    /Two   { thin1 thin2 thick3 thin4 } def\n");
+  print outfile ("    \n");
+  print outfile ("    /Three { thin1 thin2 thick3 thick4 } def\n");
+  print outfile ("\n");
+  print outfile ("    /Four  { thin1  thick2 thin3  thin4  } def\n");
+  print outfile ("    /Five  { thin1  thick2 thin3  thick4 } def\n");
+  print outfile ("    /Six   { thin1  thick2 thick3 thin4  } def\n");
+  print outfile ("    /Seven { thin1  thick2 thick3 thick4 } def\n");
+  print outfile ("    /Eight { thick1 thin2  thin3  thin4  } def\n");
+  print outfile ("    /Nine  { thick1 thin2  thin3  thick4 } def\n");
+  print outfile ("    \n");
+  print outfile ("    /Diamond {\n");
+  print outfile ("    320 840 moveto\n");
+  print outfile ("    0   420 lineto\n");
+  print outfile ("    320 -30 lineto\n");
+  print outfile ("    640 420 lineto\n");
+  print outfile ("    320 840 lineto\n");
+  print outfile ("    closepath} def\n");
+  print outfile ("  end  \n");
+  print outfile ("  \n");
+  print outfile ("  /BuildGlyph {\n");
+  print outfile ("    exch\n");
+  print outfile ("    begin\n");
+  print outfile ("      dup\n");
+  print outfile ("      Metrics\n");
+  print outfile ("      exch get\n");
+  print outfile ("      0\n");
+  print outfile ("      2 index\n");
+  print outfile ("      BoundingBoxes\n");
+  print outfile ("      exch get exec\n");
+  print outfile ("      setcachedevice\n");
+  print outfile ("      CharProcs exch get\n");
+  print outfile ("      exec\n");
+  print outfile ("      fill\n");
+  print outfile ("    end\n");
+  print outfile ("} def  \n");
+  print outfile ("  /BuildChar {\n");
+  print outfile ("  1 index /Encoding get  \n");
+  print outfile ("  exch get\n");
+  print outfile ("  1 index /BuildGlyph get\n");
+  print outfile ("  exec } def\n");
+  print outfile ("  currentdict\n");
+  print outfile ("end\n");
+  print outfile ("/Plessey exch definefont\n");
+  print outfile ("pop\n");
+  print outfile ("\n");
+  print outfile ("\n");
+  print outfile ("\n");
+  print outfile ("%/Plessey findfont\n");
+  print outfile ("%20 scalefont\n");
+  print outfile ("%setfont\n");
+  print outfile ("%72 72 moveto\n");
+  print outfile ("%([0123456789]) show\n");
+  print outfile ("%showpage\n");
+  print outfile ("\n");
+  print outfile ("\n");
+}
+
+sub whse_name {
+  local ($whse_no) = @_;
+  local ($whse_name);
+  if ($whse_no == 6) { 
+    $whse_name="6  SSI-Groc"; }
+  elsif ($whse_no == 9) {
+    $whse_name="9  RDC"; }
+  elsif ($whse_no == 16) {
+    $whse_name="16 SSI-Froz"; }
+  elsif ($whse_no == 18) {
+    $whse_name="18 Certified"; }
+  elsif ($whse_no == 19) {
+    $whse_name="19 Certified"; }
+  elsif ($whse_no == 20) {
+    $whse_name="20 Bergen"; }
+  else {
+    $whse_name=$whse_no; }   
+  return ($whse_name);
+
+}
+### add \ to and parenthesis for postscript code, otherwise interpreter will
+### not work when there is unmatching parens 
+sub clean_ps_text{
+  local ($in_text) = @_;
+  $in_text =~ s/(\(|\))/\\$1/g;
+  #$in_text =~ s/\(/\\(/g;
+  #$in_text =~ s/\)/\\)/g;
+  return ($in_text);
+}
+
+### SUB start_tag_pos
+## Calculate position of 1st tag
+## to ease col and row calculations, will use
+## 1st row and col will be 0, so if 4 columns, the will be label 0,1,2,3
+## Expect passing Physical tag #, col and row
+## pstart is physical number, Physial number is alway 1 more than 0 adjusted # 
+## 
+##  Zero adjusted chart for 3 columns and 4 rows
+##  i.e.        col
+##          0   1   2 
+##  rows 0  0   1   2 
+##       1  3   4   5
+##       2  6   7   8
+##       3  9  10  11
+##  to calculate row and col from tag number use following formula
+##  row = integer portion of (tag #)/(col # + 1)
+##  column = fraction portion of ((tag #)/(col # +1)) * (col # + 1)
+##
+## will return zero adjusted number so can calculate position
+sub start_tag_position {
+  local ($start_tag,$columns,$rows,$column_width,$row_height)= @_;
+  local ($start_column,$start_row,$start_row_float);
+  local ($start_column_pos,$start_row_pos);
+  local ($pstart_tag,$pstart_column,$pstart_row);
+  # 30  4 8 >  row 7 and col 2,  Ro
+  #  Row = start/#of column, col=rest * # of col
+  if (($start_tag>($columns * $rows)) || ($start_tag<1)) {
+    $start_column =0;
+    $start_row =0; }
+    
+  else {
+    print ("Start_tag      : $start_tag \n");
+    $start_tag=$start_tag-1;
+    $start_row_float=($start_tag/($columns));
+#    $start_row=(($start_row_float % 10)-$start_row);
+#    $start_column=(($start_row_float - $start_row)*($columns));
+    $start_row=(sprintf("%d",$start_row_float));
+    $start_column=($start_tag %$columns);
+    $pstart_row=($start_row+1);
+    $pstart_column=$start_column+1;
+    $start_row_pos=(-1*$start_row*$row_height);
+    $start_column_pos=($start_column*$column_width);
+  }   
+  #print ("  Starting on tag : $start_tag \n");
+  #print ("start_row_float: $start_row_float \n");
+  #print ("start_row      : $start_row\n");
+  #print ("start_column   : $start_column\n");
+  #print ("Physical st_row: $pstart_row\n");
+  #print ("Physical st_col: $pstart_column\n");
+  #print ("start_row_pos  : $start_row_pos\n");
+  #print ("start_col_pos  : $start_column_pos\n");
+  printf outfile ("%0.2f %0.2f translate\n",($start_column_pos),($start_row_pos));
+  ## Set current column and row to position of first tag
+  $ccol=$start_column+1;
+  $crow=$start_row+1;
+}
+
+
+
+
+#  Would like to print price with following options
+#  < 1.00  Big 2 digits + smaller cent marker
+#  > 1.00  Big $ digits with 2 smaller cent digits
+#  3 for <1.00  3/ .99  Digits same but with leading small 3/
+#  3 for >1.00  3/ 1.00 Digits sames as above with leading small 3/
+
